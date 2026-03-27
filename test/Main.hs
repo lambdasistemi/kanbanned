@@ -4,10 +4,11 @@ Description : Unit test entry point
 -}
 module Main (main) where
 
-import Test.Hspec (hspec, describe, it, shouldBe)
+import Kanbanned.GitHub.TypesSpec qualified
+import Kanbanned.Terminal.InputSpec qualified
+import Test.Hspec.Runner (defaultConfig, hspecWith)
 
 main :: IO ()
-main = hspec $ do
-    describe "Kanbanned" $ do
-        it "placeholder" $ do
-            True `shouldBe` True
+main = hspecWith defaultConfig $ do
+    Kanbanned.Terminal.InputSpec.spec
+    Kanbanned.GitHub.TypesSpec.spec
