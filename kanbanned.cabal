@@ -106,15 +106,19 @@ test-suite unit-tests
   main-is:            Main.hs
   other-modules:
     Kanbanned.GitHub.TypesSpec
+    Kanbanned.SmokeSpec
     Kanbanned.Terminal.InputSpec
 
   hs-source-dirs:     test
   default-language:   GHC2021
   build-depends:
-    , aeson      >=2.1  && <2.3
-    , base       >=4.18 && <5
-    , hspec      >=2.11 && <2.12
+    , aeson       >=2.1  && <2.3
+    , async       >=2.2  && <2.3
+    , base        >=4.18 && <5
+    , bytestring  >=0.11 && <0.13
+    , hspec       >=2.11 && <2.12
     , kanbanned
+    , process     >=1.6  && <1.7
 
   default-extensions: OverloadedStrings
   build-tool-depends: hspec-discover:hspec-discover
