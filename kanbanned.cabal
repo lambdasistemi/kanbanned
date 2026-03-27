@@ -1,0 +1,80 @@
+cabal-version:   3.4
+name:            kanbanned
+version:         0.1.0.0
+synopsis:        Terminal kanban board for agent-daemon
+description:
+  A Haskell TUI application that provides a terminal-based kanban
+  board interface for agent-daemon. Displays GitHub Projects v2
+  boards (Backlog/WIP/Done) and manages agent sessions with
+  embedded terminal views via libvterm.
+
+license:         MIT
+license-file:    LICENSE
+author:          paolino
+maintainer:      paolo.veronelli@gmail.com
+homepage:        https://github.com/lambdasistemi/kanbanned
+bug-reports:     https://github.com/lambdasistemi/kanbanned/issues
+category:        Development, Terminal
+build-type:      Simple
+tested-with:     GHC ==9.8.4
+extra-doc-files: README.md
+
+source-repository head
+  type:     git
+  location: https://github.com/lambdasistemi/kanbanned
+
+flag werror
+  description: Enable -Werror
+  manual:      True
+  default:     False
+
+common warnings
+  ghc-options:
+    -Wall -Wunused-imports -Wunused-packages -Wmissing-export-lists
+    -Wname-shadowing -Wredundant-constraints
+
+  if flag(werror)
+    ghc-options: -Werror
+
+library
+  import:           warnings
+  exposed-modules:  Kanbanned
+  hs-source-dirs:   src
+  default-language: GHC2021
+  build-depends:
+    , base >=4.18 && <5
+
+  default-extensions:
+    DerivingStrategies
+    ImportQualifiedPost
+    LambdaCase
+    OverloadedStrings
+    StrictData
+
+executable kanbanned
+  import:           warnings
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  default-language: GHC2021
+  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+    , base       >=4.18 && <5
+    , kanbanned
+
+  default-extensions:
+    ImportQualifiedPost
+    OverloadedStrings
+
+test-suite unit-tests
+  import:             warnings
+  type:               exitcode-stdio-1.0
+  main-is:            Main.hs
+  hs-source-dirs:     test
+  default-language:   GHC2021
+  build-depends:
+    , base       >=4.18 && <5
+    , hspec      >=2.11 && <2.12
+    , kanbanned
+
+  default-extensions: OverloadedStrings
+  build-tool-depends: hspec-discover:hspec-discover

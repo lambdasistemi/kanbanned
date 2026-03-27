@@ -1,0 +1,23 @@
+site_name: kanbanned
+site_url: https://lambdasistemi.github.io/kanbanned/
+repo_url: https://github.com/lambdasistemi/kanbanned
+repo_name: lambdasistemi/kanbanned
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep purple
+    accent: amber
+
+nav:
+  - Home: index.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
