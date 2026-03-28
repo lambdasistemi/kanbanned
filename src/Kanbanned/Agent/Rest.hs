@@ -25,6 +25,7 @@ import Network.HTTP.Client
     ( Manager
     , Request (..)
     , RequestBody (..)
+    , Response
     , httpLbs
     , parseRequest
     , responseBody
@@ -104,16 +105,15 @@ listBranches client = do
 
 -- HTTP helpers
 
-agentGet
-    :: AgentClient -> String -> IO (Either Text LBS.ByteString)
-agentGet AgentClient{..} path = do
-    req <- parseRequest $ T.unpack acBaseUrl <> path
-    resp <- httpLbs req acManager
+-- | Check response status and return body or error
+requireSuccess
+    :: Response LBS.ByteString
+    -> Either Text LBS.ByteString
+requireSuccess resp =
     let code = statusCode (responseStatus resp)
-    if code >= 200 && code < 300
-        then pure $ Right $ responseBody resp
-        else
-            pure $
+    in  if code >= 200 && code < 300
+            then Right $ responseBody resp
+            else
                 Left $
                     "HTTP "
                         <> T.pack (show code)
@@ -122,6 +122,13 @@ agentGet AgentClient{..} path = do
                             ( show $
                                 LBS.take 200 (responseBody resp)
                             )
+
+agentGet
+    :: AgentClient -> String -> IO (Either Text LBS.ByteString)
+agentGet AgentClient{..} path = do
+    req <- parseRequest $ T.unpack acBaseUrl <> path
+    resp <- httpLbs req acManager
+    pure $ requireSuccess resp
 
 agentPost
     :: AgentClient
@@ -138,14 +145,7 @@ agentPost AgentClient{..} path body = do
                 , requestBody = RequestBodyLBS body
                 }
     resp <- httpLbs req acManager
-    let code = statusCode (responseStatus resp)
-    if code >= 200 && code < 300
-        then pure $ Right $ responseBody resp
-        else
-            pure $
-                Left $
-                    "HTTP "
-                        <> T.pack (show code)
+    pure $ requireSuccess resp
 
 agentDelete
     :: AgentClient -> String -> IO (Either Text LBS.ByteString)
@@ -153,14 +153,7 @@ agentDelete AgentClient{..} path = do
     req0 <- parseRequest $ T.unpack acBaseUrl <> path
     let req = req0{method = "DELETE"}
     resp <- httpLbs req acManager
-    let code = statusCode (responseStatus resp)
-    if code >= 200 && code < 300
-        then pure $ Right $ responseBody resp
-        else
-            pure $
-                Left $
-                    "HTTP "
-                        <> T.pack (show code)
+    pure $ requireSuccess resp
 
 eitherDecode'
     :: (FromJSON a)

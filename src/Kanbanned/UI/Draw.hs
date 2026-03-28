@@ -10,7 +10,6 @@ import Brick
     ( AttrName
     , Padding (..)
     , Widget
-    , attrName
     , emptyWidget
     , hBox
     , padBottom
@@ -28,6 +27,20 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Graphics.Vty qualified as V
+import Kanbanned.App.Attrs
+    ( columnBacklogAttr
+    , columnDoneAttr
+    , columnWipAttr
+    , dimAttr
+    , headerAttr
+    , itemAttr
+    , labelAttr
+    , selectedAttr
+    , statusbarAttr
+    , tabActiveAttr
+    , tabAttr
+    , toastAttr
+    )
 import Kanbanned.Config (Config (..))
 import Kanbanned.GitHub.Types
     ( ItemType (..)
@@ -67,7 +80,7 @@ drawTerminalPane st img =
     let sid =
             fromMaybe "?" (stActiveTerminal st)
         header =
-            withAttr (attrName "header") $
+            withAttr headerAttr $
                 padRight Max $
                     txt (" Terminal: " <> sid)
     in  header <=> raw img
@@ -78,7 +91,7 @@ drawTerminalPane st img =
 
 drawHeader :: AppState -> Widget Name
 drawHeader st =
-    withAttr (attrName "header") $
+    withAttr headerAttr $
         padRight Max $
             txt $
                 " kanbanned"
@@ -123,7 +136,7 @@ drawItems :: AppState -> Widget Name
 drawItems st =
     let items = currentColumnItems st
     in  if null items
-            then withAttr (attrName "dim") $ str "(empty)"
+            then withAttr dimAttr $ str "(empty)"
             else vBox $ zipWith (drawItem st) [0 ..] items
 
 drawItem :: AppState -> Int -> ProjectItem -> Widget Name
@@ -157,8 +170,8 @@ drawItem st idx item =
                 <> indicator
         attr =
             if isSelected
-                then attrName "selected"
-                else attrName "item"
+                then selectedAttr
+                else itemAttr
         itemLine = withAttr attr $ padRight Max $ txt line
         expanded =
             if isExpanded
@@ -173,7 +186,7 @@ drawExpanded item =
             if null labels
                 then emptyWidget
                 else
-                    withAttr (attrName "label") $
+                    withAttr labelAttr $
                         padLeft (Pad 2) $
                             txt $
                                 T.intercalate ", " labels
@@ -182,7 +195,7 @@ drawExpanded item =
             Just b ->
                 padLeft (Pad 2) $ renderMarkdownWidget b
         actions =
-            withAttr (attrName "dim") $
+            withAttr dimAttr $
                 padLeft (Pad 2) $
                     txt "[m]ove [a]gent [o]pen [d]elete"
     in  labelLine <=> bodyWidget <=> actions
@@ -191,25 +204,25 @@ drawSettings :: AppState -> Widget Name
 drawSettings st =
     let cfg = stConfig st
     in  vBox
-            [ withAttr (attrName "header") $ txt "Settings"
+            [ withAttr headerAttr $ txt "Settings"
             , str ""
             , hBox
-                [ withAttr (attrName "label") $ txt "GitHub Token: "
+                [ withAttr labelAttr $ txt "GitHub Token: "
                 , txt $ case cfgGitHubToken cfg of
                     Just t -> T.take 8 t <> "..."
                     Nothing -> "(not set)"
                 ]
             , hBox
-                [ withAttr (attrName "label") $ txt "Agent Server: "
+                [ withAttr labelAttr $ txt "Agent Server: "
                 , txt $ cfgAgentServer cfg
                 ]
             , hBox
-                [ withAttr (attrName "label") $ txt "Project: "
+                [ withAttr labelAttr $ txt "Project: "
                 , txt $
                     fromMaybe "(not selected)" (cfgProjectId cfg)
                 ]
             , str ""
-            , withAttr (attrName "dim") $
+            , withAttr dimAttr $
                 txt "Press 's' to cycle settings, 'q' to go back"
             ]
 
@@ -219,7 +232,7 @@ drawSettings st =
 
 drawStatusBar :: AppState -> Widget Name
 drawStatusBar st =
-    withAttr (attrName "statusbar") $
+    withAttr statusbarAttr $
         padRight Max $
             hBox
                 [ drawTabs st
@@ -243,20 +256,20 @@ drawTabs st =
                     <> ")"
             attr =
                 if stPage st == page
-                    then attrName "tab.active"
-                    else attrName "tab"
+                    then tabActiveAttr
+                    else tabAttr
         in  withAttr attr (txt $ " " <> label <> " ")
 
 drawHelp :: AppState -> Widget Name
 drawHelp st =
-    withAttr (attrName "dim") $ txt $ case stPage st of
+    withAttr dimAttr $ txt $ case stPage st of
         SettingsPage -> "q:quit"
         _ -> "h/l:col j/k:nav m:move a:agent Enter:expand q:quit"
 
 drawToast :: AppState -> Widget Name
 drawToast st = case stToast st of
     Nothing -> emptyWidget
-    Just msg -> withAttr (attrName "toast") $ txt msg
+    Just msg -> withAttr toastAttr $ txt msg
 
 ------------------------------------------------------------------------
 -- Helpers
@@ -271,6 +284,6 @@ pageToStatus = \case
 
 columnAttr :: KanbanStatus -> AttrName
 columnAttr = \case
-    Backlog -> attrName "column.backlog"
-    WIP -> attrName "column.wip"
-    Done -> attrName "column.done"
+    Backlog -> columnBacklogAttr
+    WIP -> columnWipAttr
+    Done -> columnDoneAttr

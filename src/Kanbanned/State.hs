@@ -10,6 +10,7 @@ module Kanbanned.State
     , initialState
     , currentColumnItems
     , columnCount
+    , projectItems
     ) where
 
 import Data.Map.Strict (Map)
@@ -93,27 +94,24 @@ initialState cfg =
         , stTerminalImage = Nothing
         }
 
+-- | Get all filtered items for the configured project
+projectItems :: AppState -> [ProjectItem]
+projectItems st = case cfgProjectId (stConfig st) of
+    Just pid ->
+        filter (matchesFilters st) $
+            Map.findWithDefault [] pid (stItems st)
+    Nothing -> []
+
 -- | Get items for current column
 currentColumnItems :: AppState -> [ProjectItem]
 currentColumnItems st =
     let status = pageToStatus (stPage st)
-        allItems = case cfgProjectId (stConfig st) of
-            Just pid ->
-                Map.findWithDefault [] pid (stItems st)
-            Nothing -> []
-    in  filter (matchesStatus status) $
-            filter (matchesFilters st) allItems
+    in  filter (matchesStatus status) $ projectItems st
 
 -- | Count items in a column
 columnCount :: AppState -> KanbanStatus -> Int
 columnCount st status =
-    let allItems = case cfgProjectId (stConfig st) of
-            Just pid ->
-                Map.findWithDefault [] pid (stItems st)
-            Nothing -> []
-    in  length $
-            filter (matchesStatus status) $
-                filter (matchesFilters st) allItems
+    length $ filter (matchesStatus status) $ projectItems st
 
 pageToStatus :: Page -> KanbanStatus
 pageToStatus = \case

@@ -76,7 +76,7 @@ refreshData env = do
                                 (\sess -> (Kanbanned.Agent.Types.asId sess, sess))
                                 sessions
                     }
-        Left _ -> pure ()
+        Left e -> sendEvent env (ErrorEvent e)
     branchResult <- listBranches (envAgentClient env)
     case branchResult of
         Right branches ->
@@ -88,6 +88,6 @@ refreshData env = do
                                 (\b -> (Kanbanned.Agent.Types.biName b, b))
                                 branches
                     }
-        Left _ -> pure ()
+        Left e -> sendEvent env (ErrorEvent e)
     updateState env $ \s ->
         s{stLoading = False, stToast = Nothing}

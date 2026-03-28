@@ -43,9 +43,11 @@ instance FromJSON Config where
     parseJSON = withObject "Config" $ \o ->
         Config
             <$> o .:? "github_token"
-            <*> (fromMaybe "http://localhost:8080" <$> o .:? "agent_server")
+            <*> (fromMaybe (cfgAgentServer defaultConfig) <$> o .:? "agent_server")
             <*> o .:? "project_id"
-            <*> (fromMaybe 30 <$> o .:? "refresh_interval")
+            <*> ( fromMaybe (cfgRefreshInterval defaultConfig)
+                    <$> o .:? "refresh_interval"
+                )
 
 instance ToJSON Config where
     toJSON Config{..} =

@@ -200,37 +200,19 @@ handleMoveItem env = do
                         (opt : _) -> do
                             -- Optimistic update
                             modify $ \s ->
-                                let is =
-                                        Map.findWithDefault
-                                            []
-                                            pid
-                                            (stItems s)
-                                    is' =
-                                        map
-                                            ( \i ->
-                                                if itemId i
-                                                    == itemId item
-                                                    then
-                                                        i
-                                                            { itemStatus =
-                                                                Just target
-                                                            }
-                                                    else i
+                                ( updateItemInState
+                                    pid
+                                    (itemId item)
+                                    (\i -> i{itemStatus = Just target})
+                                    s
+                                )
+                                    { stSelectedIndex = 0
+                                    , stToast =
+                                        Just
+                                            ( "Moving to "
+                                                <> tText
                                             )
-                                            is
-                                in  s
-                                        { stItems =
-                                            Map.insert
-                                                pid
-                                                is'
-                                                (stItems s)
-                                        , stSelectedIndex = 0
-                                        , stToast =
-                                            Just
-                                                ( "Moving to "
-                                                    <> tText
-                                                )
-                                        }
+                                    }
                             -- API call in background
                             liftIO $
                                 void $
@@ -254,32 +236,11 @@ handleMoveItem env = do
                                                 -- Rollback
                                                 writeChan
                                                     env
-                                                    ( StateUpdate $ \s ->
-                                                        let is =
-                                                                Map.findWithDefault
-                                                                    []
-                                                                    pid
-                                                                    (stItems s)
-                                                            is' =
-                                                                map
-                                                                    ( \i ->
-                                                                        if itemId i
-                                                                            == itemId item
-                                                                            then
-                                                                                i
-                                                                                    { itemStatus =
-                                                                                        itemStatus item
-                                                                                    }
-                                                                            else i
-                                                                    )
-                                                                    is
-                                                        in  s
-                                                                { stItems =
-                                                                    Map.insert
-                                                                        pid
-                                                                        is'
-                                                                        (stItems s)
-                                                                }
+                                                    ( StateUpdate $
+                                                        updateItemInState
+                                                            pid
+                                                            (itemId item)
+                                                            (\i -> i{itemStatus = itemStatus item})
                                                     )
                                                 writeChan
                                                     env
@@ -359,15 +320,14 @@ attachTerminal env sessionId = do
     writeIORef (envTermConn env) Nothing
     -- Get terminal size — use half width for split pane
     (termW, termH) <- getTermSize
-    let cols = max 40 (termW `div` 2)
-        rows = max 10 (termH - 2)
+    let cols = max minTerminalCols (termW `div` 2)
+        rows = max minTerminalRows (termH - terminalHeightPadding)
     tv <- newTerminalView rows cols (Just sessionId)
     let (host, port) =
             parseHostPort
                 (cfgAgentServer (envConfig env))
-    -- Timeout after 10 seconds
     mResult <-
-        timeout 10_000_000 $
+        timeout connectionTimeout $
             connectTerminal host port sessionId
     case mResult of
         Just (Right conn) -> do
@@ -471,6 +431,45 @@ nextPage s =
     next WIPPage = DonePage
     next DonePage = BacklogPage
     next SettingsPage = BacklogPage
+
+------------------------------------------------------------------------
+-- Constants
+------------------------------------------------------------------------
+
+-- | Minimum terminal pane width in columns
+minTerminalCols :: Int
+minTerminalCols = 40
+
+-- | Minimum terminal pane height in rows
+minTerminalRows :: Int
+minTerminalRows = 10
+
+-- | Rows reserved for chrome (header, status bar)
+terminalHeightPadding :: Int
+terminalHeightPadding = 2
+
+-- | Timeout for WebSocket connection in microseconds (10s)
+connectionTimeout :: Int
+connectionTimeout = 10_000_000
+
+------------------------------------------------------------------------
+-- Item update helper
+------------------------------------------------------------------------
+
+-- | Update a single item's fields within a project's item list
+updateItemInState
+    :: T.Text
+    -> T.Text
+    -> (ProjectItem -> ProjectItem)
+    -> AppState
+    -> AppState
+updateItemInState pid targetId f s =
+    let is = Map.findWithDefault [] pid (stItems s)
+        is' =
+            map
+                (\i -> if itemId i == targetId then f i else i)
+                is
+    in  s{stItems = Map.insert pid is' (stItems s)}
 
 ------------------------------------------------------------------------
 -- Utilities

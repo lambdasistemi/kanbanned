@@ -6,10 +6,18 @@ module Kanbanned.UI.Markdown
     ( renderMarkdownWidget
     ) where
 
-import Brick (Widget, attrName, txt, vBox, withAttr, (<+>))
+import Brick (Widget, txt, vBox, withAttr, (<+>))
 import CMark (Node (..), NodeType (..), commonmarkToNode)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Kanbanned.App.Attrs
+    ( mdCodeAttr
+    , mdH1Attr
+    , mdH2Attr
+    , mdH3Attr
+    , mdHrAttr
+    , mdQuoteAttr
+    )
 import Kanbanned.State (Name)
 
 -- | Render markdown text as a brick widget
@@ -26,18 +34,18 @@ renderBlock (Node _ nodeType children) = case nodeType of
         [renderInlines children, txt ""]
     HEADING level ->
         let attr = case level of
-                1 -> attrName "md.h1"
-                2 -> attrName "md.h2"
-                _ -> attrName "md.h3"
+                1 -> mdH1Attr
+                2 -> mdH2Attr
+                _ -> mdH3Attr
         in  [withAttr attr $ renderInlines children, txt ""]
     CODE_BLOCK _info code ->
         map
-            (\line -> withAttr (attrName "md.code") $ txt $ "  " <> line)
+            (\line -> withAttr mdCodeAttr $ txt $ "  " <> line)
             (T.lines code)
             <> [txt ""]
     BLOCK_QUOTE ->
         map
-            (\w -> withAttr (attrName "md.quote") $ txt "│ " <+> w)
+            (\w -> withAttr mdQuoteAttr $ txt "│ " <+> w)
             (concatMap renderBlock children)
     LIST _ ->
         concatMap renderListItem children
@@ -45,7 +53,7 @@ renderBlock (Node _ nodeType children) = case nodeType of
         let inlines = concatMap nodeChildren children
         in  [txt "  - " <+> renderInlines inlines]
     THEMATIC_BREAK ->
-        [withAttr (attrName "md.hr") $ txt "────────────────"]
+        [withAttr mdHrAttr $ txt "────────────────"]
     _ -> concatMap renderBlock children
 
 renderListItem :: Node -> [Widget Name]
