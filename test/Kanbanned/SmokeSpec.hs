@@ -10,8 +10,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import System.Exit (ExitCode (..))
 import System.IO
-    ( Handle
-    , hClose
+    ( hClose
     , hFlush
     , hSetBinaryMode
     )

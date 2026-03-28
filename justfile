@@ -32,7 +32,7 @@ hlint:
 # Build all components
 build:
     #!/usr/bin/env bash
-    cabal build all --enable-tests -O0
+    cabal build all --enable-tests -O0 -f werror
 
 # Run unit tests with optional match pattern
 unit match="":
