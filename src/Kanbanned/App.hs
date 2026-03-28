@@ -31,6 +31,7 @@ import Kanbanned.UI.Draw (drawUI)
 import Kanbanned.UI.Terminal (freeTerminalView)
 import Network.HTTP.Client (newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import System.Environment (setEnv)
 
 ------------------------------------------------------------------------
 -- CLI overrides
@@ -85,7 +86,12 @@ runApp overrides = do
                 , envTermConn = tcRef
                 }
     void $ forkIO $ refreshLoop env cfg
-    let buildVty = mkVty V.defaultConfig
+    -- Ensure vty sees a color-capable TERM
+    setEnv "TERM" "xterm-256color"
+    let buildVty = do
+            v <- mkVty V.defaultConfig
+            V.setMode (V.outputIface v) V.Mouse True
+            pure v
     initialVty <- buildVty
     void $
         customMain

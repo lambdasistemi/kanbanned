@@ -14,6 +14,7 @@ module Kanbanned.UI.Terminal
 import Brick (Widget, raw)
 import Data.ByteString (ByteString)
 import Data.Text qualified as T
+import Data.Word (Word8)
 import Graphics.Vty qualified as V
 import Kanbanned.State (Name)
 import System.Terminal.LibVTerm
@@ -63,16 +64,24 @@ getTerminalImage TerminalView{..} = do
     pure $ V.vertCat $ map renderRow grid
 
 renderRow :: [Cell] -> V.Image
-renderRow cells = V.horizCat $ map renderCell cells
+renderRow = V.horizCat . map renderSpan . coalesce
+  where
+    -- Group consecutive cells with same attributes
+    coalesce :: [Cell] -> [(V.Attr, T.Text)]
+    coalesce [] = []
+    coalesce (c : cs) =
+        let attr = cellAttr c
+            txt = cellChar c
+            (same, rest) = span (\c' -> cellAttr c' == attr) cs
+            combined = txt <> T.concat (map cellChar same)
+        in  (attr, combined) : coalesce rest
 
-renderCell :: Cell -> V.Image
-renderCell Cell{..} =
-    let attr = cellToVtyAttr cellAttrs cellFg cellBg
-        ch =
-            if T.null cellChars
-                then " "
-                else cellChars
-    in  V.text' attr ch
+    cellAttr Cell{..} = cellToVtyAttr cellAttrs cellFg cellBg
+    cellChar Cell{..} =
+        if T.null cellChars then " " else cellChars
+
+renderSpan :: (V.Attr, T.Text) -> V.Image
+renderSpan (attr, txt) = V.text' attr txt
 
 cellToVtyAttr :: CellAttrs -> VT.Color -> VT.Color -> V.Attr
 cellToVtyAttr CellAttrs{..} fg bg =
@@ -93,5 +102,22 @@ vtColorToVty = \case
     VT.ColorDefault -> V.white
     VT.ColorRGB r g b -> V.rgbColor r g b
     VT.ColorIndex i
+        -- In FullColor mode, convert indexed colors to RGB
+        -- for maximum fidelity
         | i < 16 -> V.ISOColor (fromIntegral i)
-        | otherwise -> V.Color240 (fromIntegral i - 16)
+        | i < 232 ->
+            -- 216-color cube: 16 + 36*r + 6*g + b
+            let idx = fromIntegral i - 16 :: Int
+                r = idx `div` 36
+                g = (idx `mod` 36) `div` 6
+                b = idx `mod` 6
+                toRGB :: Int -> Word8
+                toRGB n =
+                    if n == 0
+                        then 0
+                        else fromIntegral (55 + 40 * n)
+            in  V.rgbColor (toRGB r) (toRGB g) (toRGB b)
+        | otherwise ->
+            -- Grayscale: 232-255 → 8, 18, ..., 238
+            let g = 8 + 10 * fromIntegral (i - 232) :: Word8
+            in  V.rgbColor g g g

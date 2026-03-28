@@ -76,6 +76,25 @@ handleEvent env (VtyEvent (V.EvKey key mods)) = do
     if stTerminalActive st
         then handleTerminalKey env key mods
         else handleKanbanKey env key mods
+handleEvent env (VtyEvent (V.EvMouseDown _col _row btn _mods)) = do
+    st <- get
+    if stTerminalActive st
+        then case btn of
+            V.BScrollUp -> liftIO $ do
+                mConn <- readIORef (envTermConn env)
+                -- SGR 1006: button 64 = scroll up
+                mapM_ (`sendTerminalInput` "\ESC[<64;1;1M") mConn
+            V.BScrollDown -> liftIO $ do
+                mConn <- readIORef (envTermConn env)
+                -- SGR 1006: button 65 = scroll down
+                mapM_ (`sendTerminalInput` "\ESC[<65;1;1M") mConn
+            _ -> pure ()
+        else case btn of
+            V.BScrollUp -> modify (moveSelection (-3))
+            V.BScrollDown -> modify (moveSelection 3)
+            _ -> pure ()
+handleEvent _ (VtyEvent V.EvMouseUp{}) = pure ()
+handleEvent _ (VtyEvent V.EvResize{}) = pure ()
 handleEvent _ (AppEvent (StateUpdate f)) = modify f
 handleEvent _ (AppEvent (ToastEvent msg)) =
     modify $ \s -> s{stToast = Just msg}
