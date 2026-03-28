@@ -1,12 +1,12 @@
 {- |
 Module      : Kanbanned.State
-Description : Application state management
+Description : Application state
 -}
 module Kanbanned.State
     ( AppState (..)
     , Page (..)
-    , Toast (..)
-    , ToastLevel (..)
+    , Name (..)
+    , AppEvent (..)
     , initialState
     , currentColumnItems
     , columnCount
@@ -16,10 +16,8 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.Text (Text)
-import Kanbanned.Agent.Types
-    ( AgentSession
-    , BranchInfo
-    )
+import Graphics.Vty qualified as V
+import Kanbanned.Agent.Types (AgentSession, BranchInfo)
 import Kanbanned.Config (Config (..))
 import Kanbanned.GitHub.Types
     ( KanbanStatus (..)
@@ -27,7 +25,6 @@ import Kanbanned.GitHub.Types
     , ProjectItem (..)
     , StatusField
     )
-import Kanbanned.Terminal.Raw (TermSize (..))
 
 -- | Current page/view
 data Page
@@ -37,69 +34,48 @@ data Page
     | SettingsPage
     deriving stock (Show, Eq, Ord, Enum, Bounded)
 
--- | Toast notification level
-data ToastLevel = Info | Error
-    deriving stock (Show, Eq)
+-- | Brick resource names
+data Name
+    = ItemList
+    | TerminalPane
+    deriving stock (Show, Eq, Ord)
 
--- | Toast notification
-data Toast = Toast
-    { toastMessage :: !Text
-    , toastLevel :: !ToastLevel
-    , toastTTL :: !Int
-    }
-    deriving stock (Show, Eq)
+-- | Custom events pushed from async threads
+data AppEvent
+    = StateUpdate !(AppState -> AppState)
+    | ToastEvent !Text
+    | ErrorEvent !Text
+
+instance Show AppEvent where
+    show (StateUpdate _) = "StateUpdate"
+    show (ToastEvent t) = "ToastEvent " <> show t
+    show (ErrorEvent t) = "ErrorEvent " <> show t
 
 -- | Application state
 data AppState = AppState
     { stConfig :: !Config
-    -- ^ Current config
-    , stSize :: !TermSize
-    -- ^ Terminal size
     , stPage :: !Page
-    -- ^ Current page
     , stProjects :: ![Project]
-    -- ^ Available projects
     , stItems :: !(Map Text [ProjectItem])
-    -- ^ Items per project (by project ID)
     , stStatusFields :: !(Map Text StatusField)
-    -- ^ Status field per project
     , stSelectedIndex :: !Int
-    -- ^ Currently selected item index
     , stExpandedItem :: !(Maybe Text)
-    -- ^ Expanded item ID
     , stSessions :: !(Map Text AgentSession)
-    -- ^ Active agent sessions
     , stBranches :: !(Map Text BranchInfo)
-    -- ^ Known branches
     , stRepoFilter :: !(Set Text)
-    -- ^ Repo filter
     , stLabelFilter :: !(Set Text)
-    -- ^ Label filter
-    , stToasts :: ![Toast]
-    -- ^ Active toasts
-    , stInputMode :: !(Maybe InputMode)
-    -- ^ Input mode (for text input)
+    , stToast :: !(Maybe Text)
     , stTerminalActive :: !Bool
-    -- ^ Whether terminal pane is active
     , stActiveTerminal :: !(Maybe Text)
-    -- ^ Active terminal session ID
     , stLoading :: !Bool
-    -- ^ Loading indicator
+    , stTerminalImage :: !(Maybe V.Image)
     }
-    deriving stock (Show)
-
--- | Input mode for text entry
-data InputMode
-    = NewItemInput !Text
-    | FilterInput !Text
-    deriving stock (Show, Eq)
 
 -- | Create initial application state
-initialState :: Config -> TermSize -> AppState
-initialState cfg size =
+initialState :: Config -> AppState
+initialState cfg =
     AppState
         { stConfig = cfg
-        , stSize = size
         , stPage = WIPPage
         , stProjects = []
         , stItems = Map.empty
@@ -110,19 +86,18 @@ initialState cfg size =
         , stBranches = Map.empty
         , stRepoFilter = mempty
         , stLabelFilter = mempty
-        , stToasts = []
-        , stInputMode = Nothing
+        , stToast = Nothing
         , stTerminalActive = False
         , stActiveTerminal = Nothing
         , stLoading = True
+        , stTerminalImage = Nothing
         }
 
 -- | Get items for current column
 currentColumnItems :: AppState -> [ProjectItem]
 currentColumnItems st =
     let status = pageToStatus (stPage st)
-        projId = cfgProjectId (stConfig st)
-        allItems = case projId of
+        allItems = case cfgProjectId (stConfig st) of
             Just pid ->
                 Map.findWithDefault [] pid (stItems st)
             Nothing -> []
@@ -132,8 +107,7 @@ currentColumnItems st =
 -- | Count items in a column
 columnCount :: AppState -> KanbanStatus -> Int
 columnCount st status =
-    let projId = cfgProjectId (stConfig st)
-        allItems = case projId of
+    let allItems = case cfgProjectId (stConfig st) of
             Just pid ->
                 Map.findWithDefault [] pid (stItems st)
             Nothing -> []
@@ -141,7 +115,6 @@ columnCount st status =
             filter (matchesStatus status) $
                 filter (matchesFilters st) allItems
 
--- | Map page to kanban status
 pageToStatus :: Page -> KanbanStatus
 pageToStatus = \case
     BacklogPage -> Backlog
@@ -149,15 +122,11 @@ pageToStatus = \case
     DonePage -> Done
     SettingsPage -> WIP
 
--- | Check if item matches current status
 matchesStatus :: KanbanStatus -> ProjectItem -> Bool
-matchesStatus status item =
-    itemStatus item == Just status
+matchesStatus status item = itemStatus item == Just status
 
--- | Check if item matches active filters
 matchesFilters :: AppState -> ProjectItem -> Bool
-matchesFilters st item =
-    matchesRepo && matchesLabel
+matchesFilters st item = matchesRepo && matchesLabel
   where
     matchesRepo
         | null (stRepoFilter st) = True

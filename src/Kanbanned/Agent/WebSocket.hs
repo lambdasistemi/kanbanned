@@ -11,11 +11,15 @@ module Kanbanned.Agent.WebSocket
     , closeTerminal
     ) where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM
     ( TVar
     , atomically
     , newTVarIO
+    , readTVar
     , readTVarIO
+    , retry
     , writeTVar
     )
 import Control.Exception (SomeException, catch)
@@ -23,6 +27,7 @@ import Control.Monad (when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as BS8
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Network.WebSockets qualified as WS
@@ -49,22 +54,43 @@ connectTerminal host port sessionId = do
                 <> T.unpack sessionId
                 <> "/terminal"
     alive <- newTVarIO True
-    ( do
+    connVar <- newTVarIO (Nothing :: Maybe WS.Connection)
+    errVar <- newTVarIO (Nothing :: Maybe Text)
+    -- runClient blocks until callback returns, so we
+    -- run it in a thread and wait for the connection
+    thread <-
+        async $
             WS.runClient
                 (T.unpack host)
                 port
                 path
-                $ \conn -> do
-                    pure $
-                        Right
-                            TerminalConnection
-                                { tcConnection = conn
-                                , tcSessionId = sessionId
-                                , tcAlive = alive
-                                }
-        )
-        `catch` \(e :: SomeException) ->
-            pure $ Left $ T.pack $ show e
+                ( \conn -> do
+                    atomically $ writeTVar connVar (Just conn)
+                    -- Block until connection is closed
+                    atomically $ do
+                        a <- readTVar alive
+                        when a retry
+                )
+                `catch` \(e :: SomeException) ->
+                    atomically $ do
+                        writeTVar alive False
+                        writeTVar errVar (Just $ T.pack $ show e)
+    -- Wait for connection to be established (up to 5s)
+    mConn <- waitForConn connVar alive 50
+    case mConn of
+        Just conn ->
+            pure $
+                Right
+                    TerminalConnection
+                        { tcConnection = conn
+                        , tcSessionId = sessionId
+                        , tcAlive = alive
+                        }
+        Nothing -> do
+            atomically $ writeTVar alive False
+            cancel thread
+            mErr <- readTVarIO errVar
+            pure $ Left $ fromMaybe "WebSocket timeout" mErr
 
 -- | Send raw terminal input
 sendTerminalInput
@@ -74,7 +100,7 @@ sendTerminalInput TerminalConnection{..} input = do
     when alive $
         WS.sendBinaryData tcConnection input
             `catch` \(_ :: SomeException) ->
-                atomically $ writeTVar tcAlive False
+                atomically (writeTVar tcAlive False)
 
 -- | Send terminal resize command
 sendTerminalResize
@@ -106,3 +132,26 @@ closeTerminal TerminalConnection{..} = do
     atomically $ writeTVar tcAlive False
     WS.sendClose tcConnection ("bye" :: ByteString)
         `catch` \(_ :: SomeException) -> pure ()
+
+-- | Poll for connection to be established
+waitForConn
+    :: TVar (Maybe WS.Connection)
+    -> TVar Bool
+    -> Int
+    -> IO (Maybe WS.Connection)
+waitForConn connVar alive remaining
+    | remaining <= 0 = pure Nothing
+    | otherwise = do
+        mConn <- readTVarIO connVar
+        case mConn of
+            Just conn -> pure (Just conn)
+            Nothing -> do
+                a <- readTVarIO alive
+                if a
+                    then do
+                        threadDelay 100_000
+                        waitForConn
+                            connVar
+                            alive
+                            (remaining - 1)
+                    else pure Nothing
