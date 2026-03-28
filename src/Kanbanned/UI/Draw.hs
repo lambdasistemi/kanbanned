@@ -1,6 +1,6 @@
 {- |
 Module      : Kanbanned.UI.Draw
-Description : Brick UI drawing
+Description : Brick UI drawing — split pane layout
 -}
 module Kanbanned.UI.Draw
     ( drawUI
@@ -23,6 +23,7 @@ import Brick
     , (<+>)
     , (<=>)
     )
+import Brick.Widgets.Border (vBorder)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
@@ -58,7 +59,7 @@ import Kanbanned.State
     )
 import Kanbanned.UI.Markdown (renderMarkdownWidget)
 
--- | Main draw function for brick
+-- | Main draw function
 drawUI :: AppState -> [Widget Name]
 drawUI st = [ui]
   where
@@ -68,58 +69,24 @@ drawUI st = [ui]
             <=> drawToast st
             <=> drawStatusBar st
 
+------------------------------------------------------------------------
+-- Body — split pane: item list | detail/terminal
+------------------------------------------------------------------------
+
 drawBody :: AppState -> Widget Name
-drawBody st
-    | stTerminalActive st
-    , Just img <- stTerminalImage st =
-        drawContent st <+> drawTerminalPane st img
-    | otherwise = drawContent st
-
-drawTerminalPane :: AppState -> V.Image -> Widget Name
-drawTerminalPane st img =
-    let sid =
-            fromMaybe "?" (stActiveTerminal st)
-        header =
-            withAttr headerAttr $
-                padRight Max $
-                    txt (" Terminal: " <> sid)
-    in  header <=> raw img
-
-------------------------------------------------------------------------
--- Header
-------------------------------------------------------------------------
-
-drawHeader :: AppState -> Widget Name
-drawHeader st =
-    withAttr headerAttr $
-        padRight Max $
-            txt $
-                " kanbanned"
-                    <> projName
-                    <> loading
-  where
-    projName = case cfgProjectId (stConfig st) of
-        Just pid ->
-            case filter (\p -> projectId p == pid) (stProjects st) of
-                (p : _) -> " - " <> projectTitle p
-                [] -> ""
-        Nothing -> ""
-    loading =
-        if stLoading st then " [loading...]" else ""
-
-------------------------------------------------------------------------
--- Content
-------------------------------------------------------------------------
-
-drawContent :: AppState -> Widget Name
-drawContent st = case stPage st of
+drawBody st = case stPage st of
     SettingsPage -> drawSettings st
-    _ -> drawKanban st
+    _ ->
+        let items = currentColumnItems st
+            leftPane =
+                drawColumnHeader st
+                    <=> drawItemList st items
+            rightPane = drawDetailPane st items
+        in  leftPane <+> vBorder <+> rightPane
 
-drawKanban :: AppState -> Widget Name
-drawKanban st =
-    drawColumnHeader st
-        <=> drawItems st
+------------------------------------------------------------------------
+-- Left pane — item list (always flat)
+------------------------------------------------------------------------
 
 drawColumnHeader :: AppState -> Widget Name
 drawColumnHeader st =
@@ -128,21 +95,23 @@ drawColumnHeader st =
             " "
                 <> statusToText status
                 <> " ("
-                <> T.pack (show $ length $ currentColumnItems st)
+                <> T.pack
+                    (show $ length $ currentColumnItems st)
                 <> ")"
-    in  withAttr (columnAttr status) $ padRight Max $ txt label
+    in  withAttr (columnAttr status) $
+            padRight Max $
+                txt label
 
-drawItems :: AppState -> Widget Name
-drawItems st =
-    let items = currentColumnItems st
-    in  if null items
-            then withAttr dimAttr $ str "(empty)"
-            else vBox $ zipWith (drawItem st) [0 ..] items
+drawItemList :: AppState -> [ProjectItem] -> Widget Name
+drawItemList st items
+    | null items = withAttr dimAttr $ str "(empty)"
+    | otherwise =
+        vBox $ zipWith (drawItemRow st) [0 ..] items
 
-drawItem :: AppState -> Int -> ProjectItem -> Widget Name
-drawItem st idx item =
+drawItemRow
+    :: AppState -> Int -> ProjectItem -> Widget Name
+drawItemRow st idx item =
     let isSelected = stSelectedIndex st == idx
-        isExpanded = stExpandedItem st == Just (itemId item)
         prefix = case itemType item of
             IssueItem -> "#"
             PullRequestItem -> "PR#"
@@ -156,7 +125,8 @@ drawItem st idx item =
         hasSession = case itemNumber item of
             Just n -> case itemRepoName item of
                 Just rn ->
-                    let sid = rn <> "-" <> T.pack (show n)
+                    let sid =
+                            rn <> "-" <> T.pack (show n)
                     in  Map.member sid (stSessions st)
                 Nothing -> False
             Nothing -> False
@@ -172,33 +142,72 @@ drawItem st idx item =
             if isSelected
                 then selectedAttr
                 else itemAttr
-        itemLine = withAttr attr $ padRight Max $ txt line
-        expanded =
-            if isExpanded
-                then drawExpanded item
-                else emptyWidget
-    in  itemLine <=> expanded
+    in  withAttr attr $ padRight Max $ txt line
 
-drawExpanded :: ProjectItem -> Widget Name
-drawExpanded item =
-    let labels = itemLabels item
-        labelLine =
-            if null labels
+------------------------------------------------------------------------
+-- Right pane — issue detail or terminal
+------------------------------------------------------------------------
+
+drawDetailPane
+    :: AppState -> [ProjectItem] -> Widget Name
+drawDetailPane st items
+    -- Terminal view takes priority when active
+    | stTerminalActive st
+    , Just img <- stTerminalImage st =
+        drawTerminalView st img
+    -- Otherwise show selected item detail
+    | otherwise = case selectedItem st items of
+        Just item -> drawItemDetail item
+        Nothing ->
+            withAttr dimAttr $
+                padLeft (Pad 1) $
+                    txt "Select an item"
+
+drawTerminalView :: AppState -> V.Image -> Widget Name
+drawTerminalView st img =
+    let sid = fromMaybe "?" (stActiveTerminal st)
+        header =
+            withAttr headerAttr $
+                padRight Max $
+                    txt (" Terminal: " <> sid)
+    in  header <=> raw img
+
+drawItemDetail :: ProjectItem -> Widget Name
+drawItemDetail item =
+    padLeft (Pad 1) $
+        vBox
+            [ -- Title
+              withAttr headerAttr $
+                padRight Max $
+                    txt (" " <> itemTitle item)
+            , -- Labels
+              if null (itemLabels item)
                 then emptyWidget
                 else
                     withAttr labelAttr $
-                        padLeft (Pad 2) $
-                            txt $
-                                T.intercalate ", " labels
-        bodyWidget = case itemBody item of
-            Nothing -> emptyWidget
-            Just b ->
-                padLeft (Pad 2) $ renderMarkdownWidget b
-        actions =
-            withAttr dimAttr $
-                padLeft (Pad 2) $
-                    txt "[m]ove [a]gent [o]pen [d]elete"
-    in  labelLine <=> bodyWidget <=> actions
+                        txt $
+                            T.intercalate ", " (itemLabels item)
+            , str ""
+            , -- Body (markdown)
+              case itemBody item of
+                Nothing ->
+                    withAttr dimAttr $ txt "(no description)"
+                Just b -> renderMarkdownWidget b
+            , str ""
+            , -- Actions
+              withAttr dimAttr $
+                txt "[m]ove [a]gent [Tab]terminal [q]uit"
+            ]
+
+selectedItem :: AppState -> [ProjectItem] -> Maybe ProjectItem
+selectedItem st items
+    | stSelectedIndex st < length items =
+        Just (items !! stSelectedIndex st)
+    | otherwise = Nothing
+
+------------------------------------------------------------------------
+-- Settings
+------------------------------------------------------------------------
 
 drawSettings :: AppState -> Widget Name
 drawSettings st =
@@ -207,24 +216,52 @@ drawSettings st =
             [ withAttr headerAttr $ txt "Settings"
             , str ""
             , hBox
-                [ withAttr labelAttr $ txt "GitHub Token: "
+                [ withAttr labelAttr $
+                    txt "GitHub Token: "
                 , txt $ case cfgGitHubToken cfg of
                     Just t -> T.take 8 t <> "..."
                     Nothing -> "(not set)"
                 ]
             , hBox
-                [ withAttr labelAttr $ txt "Agent Server: "
+                [ withAttr labelAttr $
+                    txt "Agent Server: "
                 , txt $ cfgAgentServer cfg
                 ]
             , hBox
                 [ withAttr labelAttr $ txt "Project: "
                 , txt $
-                    fromMaybe "(not selected)" (cfgProjectId cfg)
+                    fromMaybe
+                        "(not selected)"
+                        (cfgProjectId cfg)
                 ]
             , str ""
             , withAttr dimAttr $
-                txt "Press 's' to cycle settings, 'q' to go back"
+                txt "Press 'q' to go back"
             ]
+
+------------------------------------------------------------------------
+-- Header
+------------------------------------------------------------------------
+
+drawHeader :: AppState -> Widget Name
+drawHeader st =
+    withAttr headerAttr $
+        padRight Max $
+            txt $
+                " kanbanned" <> projName <> loading
+  where
+    projName = case cfgProjectId (stConfig st) of
+        Just pid ->
+            case filter
+                (\p -> projectId p == pid)
+                (stProjects st) of
+                (p : _) -> " - " <> projectTitle p
+                [] -> ""
+        Nothing -> ""
+    loading =
+        if stLoading st
+            then " [loading...]"
+            else ""
 
 ------------------------------------------------------------------------
 -- Status bar
@@ -261,10 +298,10 @@ drawTabs st =
         in  withAttr attr (txt $ " " <> label <> " ")
 
 drawHelp :: AppState -> Widget Name
-drawHelp st =
-    withAttr dimAttr $ txt $ case stPage st of
-        SettingsPage -> "q:quit"
-        _ -> "h/l:col j/k:nav m:move a:agent Enter:expand q:quit"
+drawHelp _st =
+    withAttr dimAttr $
+        txt
+            "h/l:col j/k:nav Enter:detail m:move a:agent Tab:term q:quit"
 
 drawToast :: AppState -> Widget Name
 drawToast st = case stToast st of

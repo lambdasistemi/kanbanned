@@ -60,7 +60,6 @@ data AppState = AppState
     , stItems :: !(Map Text [ProjectItem])
     , stStatusFields :: !(Map Text StatusField)
     , stSelectedIndex :: !Int
-    , stExpandedItem :: !(Maybe Text)
     , stSessions :: !(Map Text AgentSession)
     , stBranches :: !(Map Text BranchInfo)
     , stRepoFilter :: !(Set Text)
@@ -82,7 +81,6 @@ initialState cfg =
         , stItems = Map.empty
         , stStatusFields = Map.empty
         , stSelectedIndex = 0
-        , stExpandedItem = Nothing
         , stSessions = Map.empty
         , stBranches = Map.empty
         , stRepoFilter = mempty

@@ -154,7 +154,10 @@ handleKanbanKey env key mods
         V.KDown -> modify (moveSelection 1)
         V.KChar 'k' -> modify (moveSelection (-1))
         V.KUp -> modify (moveSelection (-1))
-        V.KEnter -> modify toggleExpand
+        -- Enter: show detail pane (deactivate terminal view)
+        V.KEnter ->
+            modify $ \s -> s{stTerminalActive = False}
+        -- Tab: toggle between detail and terminal
         V.KChar '\t' ->
             modify $ \s ->
                 s
@@ -393,26 +396,7 @@ moveSelection delta s =
         maxIdx = max 0 (length items - 1)
         newIdx =
             max 0 (min maxIdx (stSelectedIndex s + delta))
-        newExpanded =
-            if isJust (stExpandedItem s)
-                then fmap itemId (safeIndex newIdx items)
-                else Nothing
-    in  s
-            { stSelectedIndex = newIdx
-            , stExpandedItem = newExpanded
-            }
-
-toggleExpand :: AppState -> AppState
-toggleExpand s =
-    let items = currentColumnItems s
-        mItem = safeIndex (stSelectedIndex s) items
-    in  case mItem of
-            Just item
-                | stExpandedItem s == Just (itemId item) ->
-                    s{stExpandedItem = Nothing}
-                | otherwise ->
-                    s{stExpandedItem = Just (itemId item)}
-            Nothing -> s
+    in  s{stSelectedIndex = newIdx}
 
 prevPage :: AppState -> AppState
 prevPage s =
