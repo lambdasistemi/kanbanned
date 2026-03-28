@@ -7,16 +7,20 @@ module Kanbanned.State
     , Page (..)
     , Name (..)
     , AppEvent (..)
+    , ItemView (..)
     , initialState
     , currentColumnItems
     , columnCount
     , projectItems
+    , selectedItemSessionId
+    , selectedItemView
     ) where
 
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Graphics.Vty qualified as V
 import Kanbanned.Agent.Types (AgentSession, BranchInfo)
 import Kanbanned.Config (Config (..))
@@ -52,6 +56,10 @@ instance Show AppEvent where
     show (ToastEvent t) = "ToastEvent " <> show t
     show (ErrorEvent t) = "ErrorEvent " <> show t
 
+-- | What the right pane shows for an item
+data ItemView = ShowDescription | ShowTerminal
+    deriving stock (Show, Eq)
+
 -- | Application state
 data AppState = AppState
     { stConfig :: !Config
@@ -65,10 +73,12 @@ data AppState = AppState
     , stRepoFilter :: !(Set Text)
     , stLabelFilter :: !(Set Text)
     , stToast :: !(Maybe Text)
-    , stTerminalActive :: !Bool
-    , stActiveTerminal :: !(Maybe Text)
+    , stTerminalFocused :: !Bool
+    , stItemViews :: !(Map Text ItemView)
+    -- ^ Per-session view preference
+    , stTerminalImages :: !(Map Text V.Image)
+    -- ^ Live terminal images keyed by session ID
     , stLoading :: !Bool
-    , stTerminalImage :: !(Maybe V.Image)
     }
 
 -- | Create initial application state
@@ -86,10 +96,10 @@ initialState cfg =
         , stRepoFilter = mempty
         , stLabelFilter = mempty
         , stToast = Nothing
-        , stTerminalActive = False
-        , stActiveTerminal = Nothing
+        , stTerminalFocused = False
+        , stItemViews = Map.empty
+        , stTerminalImages = Map.empty
         , stLoading = True
-        , stTerminalImage = Nothing
         }
 
 -- | Get all filtered items for the configured project
@@ -103,13 +113,36 @@ projectItems st = case cfgProjectId (stConfig st) of
 -- | Get items for current column
 currentColumnItems :: AppState -> [ProjectItem]
 currentColumnItems st =
-    let status = pageToStatus (stPage st)
-    in  filter (matchesStatus status) $ projectItems st
+    filter (matchesStatus $ pageToStatus $ stPage st) $
+        projectItems st
 
 -- | Count items in a column
 columnCount :: AppState -> KanbanStatus -> Int
 columnCount st status =
-    length $ filter (matchesStatus status) $ projectItems st
+    length $
+        filter (matchesStatus status) $
+            projectItems st
+
+-- | Get the session ID for the currently selected item
+selectedItemSessionId :: AppState -> Maybe Text
+selectedItemSessionId st = do
+    let items = currentColumnItems st
+    item <- safeIdx (stSelectedIndex st) items
+    repo <- itemRepoName item
+    issue <- itemNumber item
+    let sid = repo <> "-" <> T.pack (show issue)
+    if Map.member sid (stSessions st)
+        then Just sid
+        else Nothing
+
+-- | Get the view preference for the selected item
+selectedItemView :: AppState -> ItemView
+selectedItemView st = case selectedItemSessionId st of
+    Just sid ->
+        Map.findWithDefault ShowDescription sid (stItemViews st)
+    Nothing -> ShowDescription
+
+-- Internals
 
 pageToStatus :: Page -> KanbanStatus
 pageToStatus = \case
@@ -133,3 +166,10 @@ matchesFilters st item = matchesRepo && matchesLabel
         | null (stLabelFilter st) = True
         | otherwise =
             any (`elem` stLabelFilter st) (itemLabels item)
+
+safeIdx :: Int -> [a] -> Maybe a
+safeIdx _ [] = Nothing
+safeIdx 0 (x : _) = Just x
+safeIdx n (_ : xs)
+    | n > 0 = safeIdx (n - 1) xs
+    | otherwise = Nothing

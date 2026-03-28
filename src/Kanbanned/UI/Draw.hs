@@ -52,6 +52,7 @@ import Kanbanned.GitHub.Types
     )
 import Kanbanned.State
     ( AppState (..)
+    , ItemView (..)
     , Name (..)
     , Page (..)
     , columnCount
@@ -150,27 +151,44 @@ drawItemRow st idx item =
 
 drawDetailPane
     :: AppState -> [ProjectItem] -> Widget Name
-drawDetailPane st items
-    -- Terminal view takes priority when active
-    | stTerminalActive st
-    , Just img <- stTerminalImage st =
-        drawTerminalView st img
-    -- Otherwise show selected item detail
-    | otherwise = case selectedItem st items of
-        Just item -> drawItemDetail item
-        Nothing ->
-            withAttr dimAttr $
-                padLeft (Pad 1) $
-                    txt "Select an item"
+drawDetailPane st items = case selectedItem st items of
+    Nothing ->
+        withAttr dimAttr $
+            padLeft (Pad 1) $
+                txt "Select an item"
+    Just item ->
+        let mSid = itemSid item st
+            view = case mSid of
+                Just sid ->
+                    Map.findWithDefault
+                        ShowDescription
+                        sid
+                        (stItemViews st)
+                Nothing -> ShowDescription
+        in  case (view, mSid) of
+                (ShowTerminal, Just sid)
+                    | Just img <-
+                        Map.lookup sid (stTerminalImages st) ->
+                        drawTerminalView sid img
+                _ -> drawItemDetail item
 
-drawTerminalView :: AppState -> V.Image -> Widget Name
-drawTerminalView st img =
-    let sid = fromMaybe "?" (stActiveTerminal st)
-        header =
+drawTerminalView :: T.Text -> V.Image -> Widget Name
+drawTerminalView sid img =
+    let header =
             withAttr headerAttr $
                 padRight Max $
                     txt (" Terminal: " <> sid)
     in  header <=> raw img
+
+-- | Get session ID for an item
+itemSid :: ProjectItem -> AppState -> Maybe T.Text
+itemSid item st = do
+    repo <- itemRepoName item
+    issue <- itemNumber item
+    let sid = repo <> "-" <> T.pack (show issue)
+    if Map.member sid (stSessions st)
+        then Just sid
+        else Nothing
 
 drawItemDetail :: ProjectItem -> Widget Name
 drawItemDetail item =

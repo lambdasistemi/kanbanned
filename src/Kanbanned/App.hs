@@ -14,6 +14,7 @@ import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO)
 import Control.Monad (void)
 import Data.IORef (newIORef, readIORef)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Graphics.Vty qualified as V
@@ -21,7 +22,7 @@ import Graphics.Vty.CrossPlatform (mkVty)
 import Kanbanned.Agent.Rest (newAgentClient)
 import Kanbanned.Agent.WebSocket (closeTerminal)
 import Kanbanned.App.Attrs (theAttrMap)
-import Kanbanned.App.Env (Env (..))
+import Kanbanned.App.Env (Env (..), TerminalState (..))
 import Kanbanned.App.Event (handleEvent)
 import Kanbanned.App.Refresh (refreshLoop)
 import Kanbanned.Config (Config (..), loadConfig)
@@ -70,8 +71,7 @@ runApp overrides = do
     cfg <- applyOverrides overrides <$> loadConfig
     chan <- newBChan 10
     manager <- newManager tlsManagerSettings
-    tvRef <- newIORef Nothing
-    tcRef <- newIORef Nothing
+    terminalsRef <- newIORef Map.empty
     mGhClient <- case cfgGitHubToken cfg of
         Just token -> Just <$> newGitHubClient token
         Nothing -> pure Nothing
@@ -82,11 +82,9 @@ runApp overrides = do
                 , envGhClient = mGhClient
                 , envAgentClient =
                     newAgentClient manager (cfgAgentServer cfg)
-                , envTermView = tvRef
-                , envTermConn = tcRef
+                , envTerminals = terminalsRef
                 }
     void $ forkIO $ refreshLoop env cfg
-    -- Ensure vty sees a color-capable TERM
     setEnv "TERM" "xterm-256color"
     let buildVty = do
             v <- mkVty V.defaultConfig
@@ -100,8 +98,14 @@ runApp overrides = do
             (Just chan)
             (brickApp env)
             (initialState cfg)
-    readIORef tvRef >>= mapM_ freeTerminalView
-    readIORef tcRef >>= mapM_ closeTerminal
+    -- Cleanup all terminals
+    terminals <- readIORef terminalsRef
+    mapM_
+        ( \ts -> do
+            freeTerminalView (tsView ts)
+            closeTerminal (tsConn ts)
+        )
+        (Map.elems terminals)
 
 ------------------------------------------------------------------------
 -- Brick app definition

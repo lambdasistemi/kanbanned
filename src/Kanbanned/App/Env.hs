@@ -4,12 +4,15 @@ Description : Shared environment for async operations
 -}
 module Kanbanned.App.Env
     ( Env (..)
+    , TerminalState (..)
     , sendEvent
     , updateState
     ) where
 
 import Brick.BChan (BChan, writeBChan)
 import Data.IORef (IORef)
+import Data.Map.Strict (Map)
+import Data.Text (Text)
 import Kanbanned.Agent.Rest (AgentClient)
 import Kanbanned.Agent.WebSocket (TerminalConnection)
 import Kanbanned.Config (Config)
@@ -17,14 +20,20 @@ import Kanbanned.GitHub.GraphQL (GitHubClient)
 import Kanbanned.State (AppEvent (..), AppState)
 import Kanbanned.UI.Terminal (TerminalView)
 
+-- | Per-session terminal state
+data TerminalState = TerminalState
+    { tsView :: !TerminalView
+    , tsConn :: !TerminalConnection
+    }
+
 -- | Shared environment for background threads
 data Env = Env
     { envChan :: !(BChan AppEvent)
     , envConfig :: !Config
     , envGhClient :: !(Maybe GitHubClient)
     , envAgentClient :: !AgentClient
-    , envTermView :: !(IORef (Maybe TerminalView))
-    , envTermConn :: !(IORef (Maybe TerminalConnection))
+    , envTerminals :: !(IORef (Map Text TerminalState))
+    -- ^ All active terminal connections, keyed by session ID
     }
 
 -- | Send an event to the brick event loop
