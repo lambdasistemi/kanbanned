@@ -4,7 +4,8 @@ Description : Entry point for kanbanned TUI
 -}
 module Main (main) where
 
-import Kanbanned (runApp)
+import Data.Text qualified as T
+import Kanbanned (CliOverrides (..), runApp)
 import Options.Applicative
     ( Parser
     , execParser
@@ -20,38 +21,26 @@ import Options.Applicative
     , (<**>)
     )
 
--- | CLI options
-data Options = Options
-    { _optToken :: Maybe String
-    , _optServer :: Maybe String
-    , _optProject :: Maybe String
-    }
-
-optionsParser :: Parser Options
+optionsParser :: Parser CliOverrides
 optionsParser =
-    Options
+    CliOverrides
         <$> optional
-            ( strOption
-                ( long "token"
-                    <> short 't'
-                )
+            ( T.pack
+                <$> strOption (long "token" <> short 't')
             )
         <*> optional
-            ( strOption
-                ( long "server"
-                    <> short 's'
-                )
+            ( T.pack
+                <$> strOption (long "server" <> short 's')
             )
         <*> optional
-            ( strOption
-                ( long "project"
-                    <> short 'p'
-                )
+            ( T.pack
+                <$> strOption
+                    (long "project" <> short 'p')
             )
 
 main :: IO ()
 main = do
-    _opts <-
+    opts <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -59,4 +48,4 @@ main = do
                     <> progDesc "Terminal kanban board"
                     <> header "kanbanned"
                 )
-    runApp
+    runApp opts

@@ -4,6 +4,8 @@ Description : Terminal kanban board for agent-daemon
 -}
 module Kanbanned
     ( runApp
+    , CliOverrides (..)
+    , noOverrides
     ) where
 
-import Kanbanned.App (runApp)
+import Kanbanned.App (CliOverrides (..), noOverrides, runApp)

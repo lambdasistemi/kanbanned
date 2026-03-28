@@ -15,12 +15,12 @@ import Kanbanned.Terminal.ANSI
     , enterAltScreen
     , hideCursor
     , leaveAltScreen
-    , moveTo
     , resetStyle
     , showCursor
     )
 import Kanbanned.Terminal.Raw (TermSize (..))
 import System.IO (stdout)
+import System.IO qualified as IO
 
 -- | Screen state
 newtype Screen = Screen
@@ -48,4 +48,4 @@ flushScreen _ = do
         resetStyle
             <> showCursor
             <> leaveAltScreen
-            <> moveTo 1 1
+    IO.hFlush stdout

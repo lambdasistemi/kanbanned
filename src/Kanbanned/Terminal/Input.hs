@@ -80,6 +80,7 @@ readEvent = do
                 then parseEscape
                 else pure $ KeyEvent KeyEscape noMod
         [0x0D] -> pure $ KeyEvent KeyEnter noMod
+        [0x0A] -> pure $ KeyEvent KeyEnter noMod
         [0x09] -> pure $ KeyEvent KeyTab noMod
         [0x7F] -> pure $ KeyEvent KeyBackspace noMod
         [c]

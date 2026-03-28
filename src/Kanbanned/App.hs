@@ -4,8 +4,11 @@ Description : Main application event loop
 -}
 module Kanbanned.App
     ( runApp
+    , CliOverrides (..)
+    , noOverrides
     ) where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, withAsync)
 import Control.Concurrent.STM
@@ -19,6 +22,7 @@ import Control.Exception (finally)
 import Control.Monad (forever, void)
 import Data.ByteString (ByteString)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Kanbanned.Agent.Rest
@@ -98,11 +102,36 @@ import Kanbanned.UI.Terminal
     )
 import Network.HTTP.Client (newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import System.IO qualified as IO
+
+-- | CLI overrides for config
+data CliOverrides = CliOverrides
+    { cliToken :: !(Maybe T.Text)
+    , cliServer :: !(Maybe T.Text)
+    , cliProject :: !(Maybe T.Text)
+    }
+    deriving stock (Show)
+
+-- | No overrides
+noOverrides :: CliOverrides
+noOverrides = CliOverrides Nothing Nothing Nothing
+
+-- | Apply CLI overrides to config
+applyOverrides :: CliOverrides -> Config -> Config
+applyOverrides CliOverrides{..} cfg =
+    cfg
+        { cfgGitHubToken =
+            cliToken <|> cfgGitHubToken cfg
+        , cfgAgentServer =
+            fromMaybe (cfgAgentServer cfg) cliServer
+        , cfgProjectId =
+            cliProject <|> cfgProjectId cfg
+        }
 
 -- | Run the application
-runApp :: IO ()
-runApp = do
-    cfg <- loadConfig
+runApp :: CliOverrides -> IO ()
+runApp overrides = do
+    cfg <- applyOverrides overrides <$> loadConfig
     size <- getTerminalSize
     stateVar <- newTVarIO (initialState cfg size)
     withRawMode $ do
@@ -159,7 +188,18 @@ eventLoop stateVar screen mGhClient agentClient mTermView mTermConn =
         st <- readTVarIO stateVar
         renderApp screen st mTermView
 
-        -- Read input
+        -- Wait for input (with 200ms timeout for re-render)
+        hasInput <- IO.hWaitForInput IO.stdin 200
+        if not hasInput
+            then
+                eventLoop
+                    stateVar
+                    screen
+                    mGhClient
+                    agentClient
+                    mTermView
+                    mTermConn
+            else pure ()
         event <- readEvent
         case event of
             KeyEvent key modifier ->

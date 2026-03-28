@@ -93,7 +93,7 @@ renderKanban st =
         items = currentColumnItems st
         selected = stSelectedIndex st
     in  renderColumnHeader st rect
-            <> renderItems st rect items selected 0
+            <> renderItems st rect items selected 0 0
 
 -- | Render column header
 renderColumnHeader :: AppState -> Rect -> Builder
@@ -120,9 +120,13 @@ renderItems
     -> Rect
     -> [ProjectItem]
     -> Int
+    -- ^ Selected item index
     -> Int
+    -- ^ Current item index
+    -> Int
+    -- ^ Current screen row offset
     -> Builder
-renderItems _ rect [] _ row
+renderItems _ rect [] _ _ row
     | row < rectHeight rect - 1 =
         let emptyStyle =
                 defaultStyle{styleFg = BrightBlack}
@@ -132,10 +136,10 @@ renderItems _ rect [] _ row
                 emptyStyle
                 "(empty)"
     | otherwise = mempty
-renderItems st rect (item : rest) selected row
+renderItems st rect (item : rest) selected idx row
     | row >= rectHeight rect - 1 = mempty
     | otherwise =
-        let isSelected = selected == row
+        let isSelected = selected == idx
             isExpanded =
                 stExpandedItem st == Just (itemId item)
             itemBuild =
@@ -157,6 +161,7 @@ renderItems st rect (item : rest) selected row
                     rect
                     rest
                     selected
+                    (idx + 1)
                     nextRow
 
 -- | Render a single item
