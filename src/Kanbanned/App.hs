@@ -26,9 +26,21 @@ import Kanbanned.App.Attrs (theAttrMap)
 import Kanbanned.App.Env (Env (..), TerminalState (..))
 import Kanbanned.App.Event (handleEvent)
 import Kanbanned.App.Refresh (refreshLoop)
-import Kanbanned.Config (Config (..), loadConfig)
+import Kanbanned.Config
+    ( Config (..)
+    , loadConfig
+    , loadViewState
+    , saveViewState
+    )
 import Kanbanned.GitHub.GraphQL (newGitHubClient)
-import Kanbanned.State (AppEvent, AppState, Name, initialState)
+import Kanbanned.State
+    ( AppEvent
+    , AppState
+    , Name
+    , applyViewState
+    , extractViewState
+    , initialState
+    )
 import Kanbanned.UI.Draw (drawUI)
 import Kanbanned.UI.Terminal (freeTerminalView)
 import Network.HTTP.Client (newManager)
@@ -92,13 +104,18 @@ runApp overrides = do
             V.setMode (V.outputIface v) V.Mouse True
             pure v
     initialVty <- buildVty
-    void $
+    viewState <- loadViewState
+    let initState =
+            applyViewState viewState (initialState cfg)
+    finalState <-
         customMain
             initialVty
             buildVty
             (Just chan)
             (brickApp env)
-            (initialState cfg)
+            initState
+    -- Save view state
+    saveViewState (extractViewState finalState)
     -- Cleanup: close connections (unblocks receive loops),
     -- cancel threads, then free views
     terminals <- readIORef terminalsRef

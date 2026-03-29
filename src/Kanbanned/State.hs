@@ -16,6 +16,8 @@ module Kanbanned.State
     , selectedItemSessionId
     , selectedItemView
     , buildTree
+    , applyViewState
+    , extractViewState
     ) where
 
 import Data.List (foldl')
@@ -28,7 +30,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Graphics.Vty qualified as V
 import Kanbanned.Agent.Types (AgentSession, BranchInfo)
-import Kanbanned.Config (Config (..))
+import Kanbanned.Config (Config (..), ViewState (..))
 import Kanbanned.GitHub.Types
     ( KanbanStatus (..)
     , Project
@@ -149,6 +151,42 @@ selectedItemView st = case selectedItemSessionId st of
     Just sid ->
         Map.findWithDefault ShowDescription sid (stItemViews st)
     Nothing -> ShowDescription
+
+-- | Apply persisted view state to initial state
+applyViewState :: ViewState -> AppState -> AppState
+applyViewState ViewState{..} s =
+    s
+        { stCollapsed = vsCollapsed
+        , stPage = textToPage vsPage
+        , stItemViews =
+            Map.map textToItemView vsItemViews
+        }
+  where
+    textToPage "backlog" = BacklogPage
+    textToPage "wip" = WIPPage
+    textToPage "done" = DonePage
+    textToPage _ = WIPPage
+
+    textToItemView "terminal" = ShowTerminal
+    textToItemView _ = ShowDescription
+
+-- | Extract view state for saving
+extractViewState :: AppState -> ViewState
+extractViewState s =
+    ViewState
+        { vsCollapsed = stCollapsed s
+        , vsPage = pageToText (stPage s)
+        , vsItemViews =
+            Map.map itemViewToText (stItemViews s)
+        }
+  where
+    pageToText BacklogPage = "backlog"
+    pageToText WIPPage = "wip"
+    pageToText DonePage = "done"
+    pageToText SettingsPage = "wip"
+
+    itemViewToText ShowDescription = "description"
+    itemViewToText ShowTerminal = "terminal"
 
 -- | A row in the flattened tree view
 data TreeRow
