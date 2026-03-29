@@ -12,6 +12,7 @@ import Brick (App (..), customMain)
 import Brick.BChan (newBChan)
 import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO)
+import Control.Concurrent.Async (cancel)
 import Control.Monad (void)
 import Data.IORef (newIORef, readIORef)
 import Data.Map.Strict qualified as Map
@@ -98,14 +99,12 @@ runApp overrides = do
             (Just chan)
             (brickApp env)
             (initialState cfg)
-    -- Cleanup all terminals
+    -- Cleanup: close connections (unblocks receive loops),
+    -- cancel threads, then free views
     terminals <- readIORef terminalsRef
-    mapM_
-        ( \ts -> do
-            freeTerminalView (tsView ts)
-            closeTerminal (tsConn ts)
-        )
-        (Map.elems terminals)
+    mapM_ (closeTerminal . tsConn) (Map.elems terminals)
+    mapM_ (cancel . tsReceiveThread) (Map.elems terminals)
+    mapM_ (freeTerminalView . tsView) (Map.elems terminals)
 
 ------------------------------------------------------------------------
 -- Brick app definition

@@ -9,10 +9,15 @@ module Kanbanned.App.Refresh
 
 import Brick.BChan qualified
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (async)
 import Control.Monad (forM_, forever, void)
 import Data.IORef (modifyIORef', readIORef)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
+import Foreign.C.Types (CInt (..), CUShort)
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Ptr (Ptr)
+import Foreign.Storable (peekByteOff)
 import Kanbanned.Agent.Rest (listBranches, listSessions)
 import Kanbanned.Agent.Types qualified
 import Kanbanned.Agent.WebSocket
@@ -40,7 +45,6 @@ import Kanbanned.State
 import Kanbanned.UI.Terminal
     ( TerminalView
     , feedTerminalView
-    , freeTerminalView
     , getTerminalImage
     , newTerminalView
     )
@@ -154,17 +158,28 @@ autoAttach env sessionId = do
     let (host, port) =
             parseHostPort
                 (cfgAgentServer (envConfig env))
+    (termW, termH) <- getTermSize
+    let cols = max 40 (termW `div` 2)
+        rows = max 10 (termH - 2)
     mResult <-
         timeout 10_000_000 $
             connectTerminal host port sessionId
     case mResult of
         Just (Right conn) -> do
-            tv <- newTerminalView 24 80 (Just sessionId)
-            sendTerminalResize conn 80 24
+            tv <- newTerminalView rows cols (Just sessionId)
+            sendTerminalResize conn cols rows
+            -- Start receive loop and keep the thread handle
+            thread <-
+                async $
+                    terminalReceiveLoop env sessionId tv conn
             modifyIORef' (envTerminals env) $
                 Map.insert
                     sessionId
-                    TerminalState{tsView = tv, tsConn = conn}
+                    TerminalState
+                        { tsView = tv
+                        , tsConn = conn
+                        , tsReceiveThread = thread
+                        }
             updateState env $ \s ->
                 s
                     { stItemViews =
@@ -174,8 +189,6 @@ autoAttach env sessionId = do
                             ShowTerminal
                             (stItemViews s)
                     }
-            -- Start receive loop
-            terminalReceiveLoop env sessionId tv conn
         Just (Left _) -> pure ()
         Nothing -> pure ()
 
@@ -203,18 +216,10 @@ terminalReceiveLoop env sid tv conn = go
                                 }
                         )
                 go
-            Nothing -> do
-                -- Connection closed — clean up
-                freeTerminalView tv
-                modifyIORef' (envTerminals env) $
-                    Map.delete sid
-                updateState env $ \s ->
-                    s
-                        { stTerminalImages =
-                            Map.delete
-                                sid
-                                (stTerminalImages s)
-                        }
+            Nothing ->
+                -- Connection closed — just exit.
+                -- App.hs cleanup handles freeing resources.
+                pure ()
 
 parseHostPort :: T.Text -> (T.Text, Int)
 parseHostPort url =
@@ -237,3 +242,15 @@ parseHostPort url =
     readInt t = case reads (T.unpack t) of
         [(n, "")] -> Just (n, "")
         _ -> Nothing
+
+-- | Get terminal size (cols, rows) via ioctl
+foreign import ccall unsafe "sys/ioctl.h ioctl"
+    c_ioctl :: CInt -> CInt -> Ptr a -> IO CInt
+
+getTermSize :: IO (Int, Int)
+getTermSize =
+    allocaBytes 8 $ \ptr -> do
+        _ <- c_ioctl 1 0x5413 ptr
+        rows <- peekByteOff ptr 0 :: IO CUShort
+        cols <- peekByteOff ptr 2 :: IO CUShort
+        pure (fromIntegral cols, fromIntegral rows)

@@ -10,6 +10,7 @@ module Kanbanned.App.Env
     ) where
 
 import Brick.BChan (BChan, writeBChan)
+import Control.Concurrent.Async (Async)
 import Data.IORef (IORef)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
@@ -24,6 +25,8 @@ import Kanbanned.UI.Terminal (TerminalView)
 data TerminalState = TerminalState
     { tsView :: !TerminalView
     , tsConn :: !TerminalConnection
+    , tsReceiveThread :: !(Async ())
+    -- ^ Background receive loop thread
     }
 
 -- | Shared environment for background threads

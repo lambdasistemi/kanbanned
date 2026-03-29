@@ -8,10 +8,12 @@ module Kanbanned.UI.Terminal
     , feedTerminalView
     , renderTerminalWidget
     , getTerminalImage
+    , resizeTerminalView
     , freeTerminalView
     ) where
 
 import Brick (Widget, raw)
+import Control.Exception (SomeException, catch)
 import Data.ByteString (ByteString)
 import Data.Text qualified as T
 import Data.Word (Word8)
@@ -23,6 +25,7 @@ import System.Terminal.LibVTerm
     , freeTerm
     , getGrid
     , newTerm
+    , resizeTerm
     )
 import System.Terminal.LibVTerm.Types
     ( Cell (..)
@@ -51,6 +54,13 @@ feedTerminalView TerminalView{..} = feedInput tvTerm
 freeTerminalView :: TerminalView -> IO ()
 freeTerminalView TerminalView{..} = freeTerm tvTerm
 
+-- | Resize the terminal emulator
+resizeTerminalView
+    :: TerminalView -> Int -> Int -> IO TerminalView
+resizeTerminalView tv rows cols = do
+    term' <- resizeTerm (tvTerm tv) rows cols
+    pure tv{tvTerm = term'}
+
 -- | Render the terminal as a brick widget (IO)
 renderTerminalWidget :: TerminalView -> IO (Widget Name)
 renderTerminalWidget tv = do
@@ -59,9 +69,15 @@ renderTerminalWidget tv = do
 
 -- | Get the terminal content as a vty Image (IO)
 getTerminalImage :: TerminalView -> IO V.Image
-getTerminalImage TerminalView{..} = do
-    grid <- getGrid tvTerm
-    pure $ V.vertCat $ map renderRow grid
+getTerminalImage TerminalView{..} =
+    ( do
+        grid <- getGrid tvTerm
+        let img = V.vertCat $ map renderRow grid
+        -- Force evaluation to catch chr errors here
+        img `seq` pure img
+    )
+        `catch` \(_ :: SomeException) ->
+            pure V.emptyImage
 
 renderRow :: [Cell] -> V.Image
 renderRow = V.horizCat . map renderSpan . coalesce
@@ -78,7 +94,14 @@ renderRow = V.horizCat . map renderSpan . coalesce
 
     cellAttr Cell{..} = cellToVtyAttr cellAttrs cellFg cellBg
     cellChar Cell{..} =
-        if T.null cellChars then " " else cellChars
+        if T.null cellChars
+            then " "
+            else T.map sanitize cellChars
+
+    sanitize c
+        | c < ' ' && c /= '\t' = ' '
+        | fromEnum c > 0x10FFFF = ' '
+        | otherwise = c
 
 renderSpan :: (V.Attr, T.Text) -> V.Image
 renderSpan (attr, txt) = V.text' attr txt
