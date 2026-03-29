@@ -366,7 +366,7 @@ drawHelp :: AppState -> Widget Name
 drawHelp _st =
     withAttr dimAttr $
         txt
-            "h/l:col j/k:nav Enter:detail m:move a:agent Tab:term q:quit"
+            "h/l:col j/k:nav Spc:fold c/e:all m:move a:agent Tab:term q:quit"
 
 drawToast :: AppState -> Widget Name
 drawToast st = case stToast st of

@@ -175,8 +175,13 @@ handleKanbanKey env key mods
             V.KUp -> modify (moveSelection (-1))
             -- Tab: toggle current item between description and terminal
             V.KChar '\t' -> toggleItemView env
-            -- Enter: toggle collapse on org/repo, or focus terminal on item
-            V.KEnter -> handleEnter st
+            -- Space: toggle collapse on org/repo
+            V.KChar ' ' -> handleToggleCollapse st
+            -- Enter: focus terminal on item
+            V.KEnter -> handleEnterItem st
+            -- Collapse/expand all
+            V.KChar 'c' -> modify collapseAll
+            V.KChar 'e' -> modify expandAll
             -- Move item
             V.KChar 'm' -> handleMoveItem env
             -- Agent: launch new session
@@ -389,17 +394,15 @@ moveSelection delta s =
             max 0 (min maxIdx (stSelectedIndex s + delta))
     in  s{stSelectedIndex = newIdx}
 
-handleEnter :: AppState -> EventM Name AppState ()
-handleEnter st = do
+-- | Space: toggle collapse on org/repo header rows
+handleToggleCollapse :: AppState -> EventM Name AppState ()
+handleToggleCollapse st = do
     let tree = buildTree st
         mRow = safeIndex (stSelectedIndex st) tree
     case mRow of
         Just (OrgRow org _ _) ->
             modify $ \s ->
-                s
-                    { stCollapsed =
-                        toggleSet org (stCollapsed s)
-                    }
+                s{stCollapsed = toggleSet org (stCollapsed s)}
         Just (RepoRow org repo _ _) ->
             modify $ \s ->
                 s
@@ -408,20 +411,41 @@ handleEnter st = do
                             (org <> "/" <> repo)
                             (stCollapsed s)
                     }
-        Just (ItemRow _item) ->
-            -- Focus terminal if showing terminal view
-            case selectedItemSessionId st of
-                Just sid ->
-                    case Map.findWithDefault
-                        ShowDescription
-                        sid
-                        (stItemViews st) of
-                        ShowTerminal ->
-                            modify $ \s ->
-                                s{stTerminalFocused = True}
-                        ShowDescription -> pure ()
-                Nothing -> pure ()
+        _ -> pure ()
+
+-- | Enter: focus terminal on item rows
+handleEnterItem :: AppState -> EventM Name AppState ()
+handleEnterItem st =
+    case selectedItemSessionId st of
+        Just sid ->
+            case Map.findWithDefault
+                ShowDescription
+                sid
+                (stItemViews st) of
+                ShowTerminal ->
+                    modify $ \s ->
+                        s{stTerminalFocused = True}
+                ShowDescription -> pure ()
         Nothing -> pure ()
+
+-- | Collapse all org and repo nodes
+collapseAll :: AppState -> AppState
+collapseAll s =
+    let tree = buildTree s
+        keys =
+            [ k
+            | row <- tree
+            , k <- case row of
+                OrgRow org _ _ -> [org]
+                RepoRow org repo _ _ ->
+                    [org <> "/" <> repo]
+                _ -> []
+            ]
+    in  s{stCollapsed = Set.fromList keys}
+
+-- | Expand all nodes
+expandAll :: AppState -> AppState
+expandAll s = s{stCollapsed = Set.empty}
 
 toggleSet :: (Ord a) => a -> Set a -> Set a
 toggleSet x s =
