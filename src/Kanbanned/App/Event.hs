@@ -20,6 +20,8 @@ import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
 import Data.IORef (modifyIORef', readIORef)
 import Data.Map.Strict qualified as Map
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Foreign.C.Types (CInt (..), CUShort)
@@ -50,6 +52,8 @@ import Kanbanned.State
     , ItemView (..)
     , Name
     , Page (..)
+    , TreeRow (..)
+    , buildTree
     , currentColumnItems
     , selectedItemSessionId
     )
@@ -60,6 +64,14 @@ handleEvent
     :: Env
     -> BrickEvent Name AppEvent
     -> EventM Name AppState ()
+handleEvent _env (VtyEvent (V.EvKey V.KEsc [])) = do
+    st <- get
+    case stPage st of
+        SettingsPage ->
+            modify $ \s -> s{stPage = WIPPage}
+        _ ->
+            modify $ \s ->
+                s{stTerminalFocused = False}
 handleEvent env (VtyEvent (V.EvKey key mods)) = do
     st <- get
     if stTerminalFocused st
@@ -163,15 +175,8 @@ handleKanbanKey env key mods
             V.KUp -> modify (moveSelection (-1))
             -- Tab: toggle current item between description and terminal
             V.KChar '\t' -> toggleItemView env
-            -- Enter: focus terminal if showing terminal view
-            V.KEnter ->
-                case selectedItemSessionId st of
-                    Just sid ->
-                        case Map.findWithDefault ShowDescription sid (stItemViews st) of
-                            ShowTerminal ->
-                                modify $ \s -> s{stTerminalFocused = True}
-                            ShowDescription -> pure ()
-                    Nothing -> pure ()
+            -- Enter: toggle collapse on org/repo, or focus terminal on item
+            V.KEnter -> handleEnter st
             -- Move item
             V.KChar 'm' -> handleMoveItem env
             -- Agent: launch new session
@@ -378,11 +383,51 @@ handleMoveItem env = do
 
 moveSelection :: Int -> AppState -> AppState
 moveSelection delta s =
-    let items = currentColumnItems s
-        maxIdx = max 0 (length items - 1)
+    let tree = buildTree s
+        maxIdx = max 0 (length tree - 1)
         newIdx =
             max 0 (min maxIdx (stSelectedIndex s + delta))
     in  s{stSelectedIndex = newIdx}
+
+handleEnter :: AppState -> EventM Name AppState ()
+handleEnter st = do
+    let tree = buildTree st
+        mRow = safeIndex (stSelectedIndex st) tree
+    case mRow of
+        Just (OrgRow org _ _) ->
+            modify $ \s ->
+                s
+                    { stCollapsed =
+                        toggleSet org (stCollapsed s)
+                    }
+        Just (RepoRow org repo _ _) ->
+            modify $ \s ->
+                s
+                    { stCollapsed =
+                        toggleSet
+                            (org <> "/" <> repo)
+                            (stCollapsed s)
+                    }
+        Just (ItemRow _item) ->
+            -- Focus terminal if showing terminal view
+            case selectedItemSessionId st of
+                Just sid ->
+                    case Map.findWithDefault
+                        ShowDescription
+                        sid
+                        (stItemViews st) of
+                        ShowTerminal ->
+                            modify $ \s ->
+                                s{stTerminalFocused = True}
+                        ShowDescription -> pure ()
+                Nothing -> pure ()
+        Nothing -> pure ()
+
+toggleSet :: (Ord a) => a -> Set a -> Set a
+toggleSet x s =
+    if Set.member x s
+        then Set.delete x s
+        else Set.insert x s
 
 prevPage :: AppState -> AppState
 prevPage s =

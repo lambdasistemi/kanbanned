@@ -8,17 +8,22 @@ module Kanbanned.State
     , Name (..)
     , AppEvent (..)
     , ItemView (..)
+    , TreeRow (..)
     , initialState
     , currentColumnItems
     , columnCount
     , projectItems
     , selectedItemSessionId
     , selectedItemView
+    , buildTree
     ) where
 
+import Data.List (foldl')
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Graphics.Vty qualified as V
@@ -70,6 +75,8 @@ data AppState = AppState
     , stSelectedIndex :: !Int
     , stSessions :: !(Map Text AgentSession)
     , stBranches :: !(Map Text BranchInfo)
+    , stCollapsed :: !(Set Text)
+    -- ^ Collapsed tree nodes (org name or "org/repo")
     , stRepoFilter :: !(Set Text)
     , stLabelFilter :: !(Set Text)
     , stToast :: !(Maybe Text)
@@ -91,6 +98,7 @@ initialState cfg =
         , stItems = Map.empty
         , stStatusFields = Map.empty
         , stSelectedIndex = 0
+        , stCollapsed = mempty
         , stSessions = Map.empty
         , stBranches = Map.empty
         , stRepoFilter = mempty
@@ -141,6 +149,66 @@ selectedItemView st = case selectedItemSessionId st of
     Just sid ->
         Map.findWithDefault ShowDescription sid (stItemViews st)
     Nothing -> ShowDescription
+
+-- | A row in the flattened tree view
+data TreeRow
+    = -- | org name, item count, collapsed?
+      OrgRow !Text !Int !Bool
+    | -- | org, repo name, item count, collapsed?
+      RepoRow !Text !Text !Int !Bool
+    | ItemRow !ProjectItem
+    deriving stock (Show)
+
+-- | Build a flat tree from items, respecting collapsed state
+buildTree :: AppState -> [TreeRow]
+buildTree st =
+    let items = currentColumnItems st
+        collapsed = stCollapsed st
+        -- Group by org
+        grouped = groupByOrg items
+        orgs = Map.toAscList grouped
+    in  concatMap (renderOrg collapsed) orgs
+  where
+    groupByOrg :: [ProjectItem] -> Map Text (Map Text [ProjectItem])
+    groupByOrg = foldl' addItem Map.empty
+      where
+        addItem acc item =
+            let org = fromMaybe "other" (itemRepoOwner item)
+                repo = fromMaybe "draft" (itemRepoName item)
+            in  Map.insertWith
+                    (Map.unionWith (<>))
+                    org
+                    (Map.singleton repo [item])
+                    acc
+
+    renderOrg
+        :: Set Text
+        -> (Text, Map Text [ProjectItem])
+        -> [TreeRow]
+    renderOrg collapsed (org, repos) =
+        let totalItems =
+                sum $ map length $ Map.elems repos
+            orgCollapsed = Set.member org collapsed
+        in  OrgRow org totalItems orgCollapsed
+                : if orgCollapsed
+                    then []
+                    else
+                        concatMap
+                            (renderRepo collapsed org)
+                            (Map.toAscList repos)
+
+    renderRepo
+        :: Set Text
+        -> Text
+        -> (Text, [ProjectItem])
+        -> [TreeRow]
+    renderRepo collapsed org (repo, repoItems) =
+        let key = org <> "/" <> repo
+            repoCollapsed = Set.member key collapsed
+        in  RepoRow org repo (length repoItems) repoCollapsed
+                : if repoCollapsed
+                    then []
+                    else map ItemRow repoItems
 
 -- Internals
 

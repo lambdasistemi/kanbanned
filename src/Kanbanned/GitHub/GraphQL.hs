@@ -111,18 +111,39 @@ fetchProjects client = do
     result <- graphql client projectsQuery (object [])
     pure $ result >>= parseProjects
 
--- | Fetch items for a project by node ID
+-- | Fetch all items for a project (paginated)
 fetchProjectItems
     :: GitHubClient
     -> Text
     -> IO (Either Text ([ProjectItem], StatusField))
-fetchProjectItems client nodeId = do
-    result <-
-        graphql
-            client
-            itemsQuery
-            (object ["nodeId" .= nodeId])
-    pure $ result >>= parseItems
+fetchProjectItems client nodeId = go Nothing [] Nothing
+  where
+    go cursor accItems accSf = do
+        let vars = case cursor of
+                Nothing ->
+                    object ["nodeId" .= nodeId]
+                Just c ->
+                    object
+                        [ "nodeId" .= nodeId
+                        , "after" .= c
+                        ]
+        result <- graphql client itemsQuery vars
+        case result >>= parseItems of
+            Left e -> pure $ Left e
+            Right (items, sf, mNextCursor) -> do
+                let allItems = accItems <> items
+                    statusField = accSf <|> Just sf
+                case mNextCursor of
+                    Just next ->
+                        go (Just next) allItems statusField
+                    Nothing ->
+                        case statusField of
+                            Just sf' ->
+                                pure $ Right (allItems, sf')
+                            Nothing ->
+                                pure $
+                                    Left
+                                        "No status field found"
 
 -- | Update an item's status on a project board
 updateItemStatus
@@ -196,7 +217,7 @@ projectsQuery =
 
 itemsQuery :: Text
 itemsQuery =
-    "query($nodeId: ID!) { \
+    "query($nodeId: ID!, $after: String) { \
     \  node(id: $nodeId) { \
     \    ... on ProjectV2 { \
     \      fields(first: 20) { \
@@ -208,7 +229,8 @@ itemsQuery =
     \          } \
     \        } \
     \      } \
-    \      items(first: 100) { \
+    \      items(first: 100, after: $after) { \
+    \        pageInfo { hasNextPage endCursor } \
     \        nodes { \
     \          id \
     \          fieldValues(first: 10) { \
@@ -305,13 +327,16 @@ parseProjects val =
         pure Project{..}
 
 parseItems
-    :: Value -> Either Text ([ProjectItem], StatusField)
+    :: Value
+    -> Either Text ([ProjectItem], StatusField, Maybe Text)
 parseItems val =
     case parseMaybe parser val of
         Just r -> Right r
         Nothing -> Left "Failed to parse project items"
   where
-    parser :: Value -> Parser ([ProjectItem], StatusField)
+    parser
+        :: Value
+        -> Parser ([ProjectItem], StatusField, Maybe Text)
     parser = withObject "data" $ \o -> do
         node <- o .: "node"
         fields <- node .: "fields"
@@ -319,8 +344,16 @@ parseItems val =
         let statusField = findStatusField fieldNodes
         items <- node .: "items"
         itemNodes <- items .: "nodes"
-        parsedItems <- mapM parseItem (itemNodes :: [Value])
-        pure (parsedItems, statusField)
+        parsedItems <-
+            mapM parseItem (itemNodes :: [Value])
+        -- Pagination
+        pageInfo <- items .: "pageInfo"
+        hasNext <- pageInfo .: "hasNextPage"
+        mCursor <-
+            if hasNext
+                then Just <$> pageInfo .: "endCursor"
+                else pure Nothing
+        pure (parsedItems, statusField, mCursor)
 
     findStatusField :: [Value] -> StatusField
     findStatusField nodes =

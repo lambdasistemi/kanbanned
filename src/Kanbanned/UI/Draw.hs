@@ -55,6 +55,8 @@ import Kanbanned.State
     , ItemView (..)
     , Name (..)
     , Page (..)
+    , TreeRow (..)
+    , buildTree
     , columnCount
     , currentColumnItems
     )
@@ -78,10 +80,11 @@ drawBody :: AppState -> Widget Name
 drawBody st = case stPage st of
     SettingsPage -> drawSettings st
     _ ->
-        let items = currentColumnItems st
+        let tree = buildTree st
+            items = currentColumnItems st
             leftPane =
                 drawColumnHeader st
-                    <=> drawItemList st items
+                    <=> drawTreeList st tree
             rightPane = drawDetailPane st items
         in  leftPane <+> vBorder <+> rightPane
 
@@ -103,47 +106,91 @@ drawColumnHeader st =
             padRight Max $
                 txt label
 
-drawItemList :: AppState -> [ProjectItem] -> Widget Name
-drawItemList st items
-    | null items = withAttr dimAttr $ str "(empty)"
+drawTreeList :: AppState -> [TreeRow] -> Widget Name
+drawTreeList st rows
+    | null rows = withAttr dimAttr $ str "(empty)"
     | otherwise =
-        vBox $ zipWith (drawItemRow st) [0 ..] items
+        vBox $ zipWith (drawTreeRow st) [0 ..] rows
 
-drawItemRow
-    :: AppState -> Int -> ProjectItem -> Widget Name
-drawItemRow st idx item =
-    let isSelected = stSelectedIndex st == idx
-        prefix = case itemType item of
-            IssueItem -> "#"
-            PullRequestItem -> "PR#"
-            DraftIssueItem -> "*"
-        number = case itemNumber item of
-            Just n -> prefix <> T.pack (show n)
-            Nothing -> prefix <> "draft"
-        repo = fromMaybe "" (itemRepoName item)
-        repoPrefix =
-            if T.null repo then "" else repo <> " "
-        hasSession = case itemNumber item of
-            Just n -> case itemRepoName item of
-                Just rn ->
-                    let sid =
-                            rn <> "-" <> T.pack (show n)
-                    in  Map.member sid (stSessions st)
-                Nothing -> False
-            Nothing -> False
-        indicator = if hasSession then " [A]" else ""
-        line =
-            " "
-                <> number
-                <> " "
-                <> repoPrefix
-                <> itemTitle item
-                <> indicator
-        attr =
-            if isSelected
-                then selectedAttr
-                else itemAttr
-    in  withAttr attr $ padRight Max $ txt line
+drawTreeRow
+    :: AppState -> Int -> TreeRow -> Widget Name
+drawTreeRow st idx row =
+    let sel = stSelectedIndex st == idx
+    in  case row of
+            OrgRow org count collapsed ->
+                let arrow =
+                        if collapsed then "▸ " else "▾ "
+                    label =
+                        arrow
+                            <> org
+                            <> " ("
+                            <> T.pack (show count)
+                            <> ")"
+                in  withAttr
+                        ( if sel
+                            then selectedAttr
+                            else headerAttr
+                        )
+                        $ padRight Max
+                        $ txt label
+            RepoRow _org repo count collapsed ->
+                let arrow =
+                        if collapsed
+                            then "  ▸ "
+                            else "  ▾ "
+                    label =
+                        arrow
+                            <> repo
+                            <> " ("
+                            <> T.pack (show count)
+                            <> ")"
+                in  withAttr
+                        ( if sel
+                            then selectedAttr
+                            else labelAttr
+                        )
+                        $ padRight Max
+                        $ txt label
+            ItemRow item ->
+                let prefix = case itemType item of
+                        IssueItem -> "#"
+                        PullRequestItem -> "PR#"
+                        DraftIssueItem -> "*"
+                    number = case itemNumber item of
+                        Just n ->
+                            prefix <> T.pack (show n)
+                        Nothing -> prefix <> "draft"
+                    hasSession =
+                        case itemNumber item of
+                            Just n ->
+                                case itemRepoName item of
+                                    Just rn ->
+                                        Map.member
+                                            ( rn
+                                                <> "-"
+                                                <> T.pack
+                                                    (show n)
+                                            )
+                                            (stSessions st)
+                                    Nothing -> False
+                            Nothing -> False
+                    indicator =
+                        if hasSession
+                            then " [A]"
+                            else ""
+                    line =
+                        "    "
+                            <> number
+                            <> " "
+                            <> itemTitle item
+                            <> indicator
+                    attr =
+                        if sel
+                            then selectedAttr
+                            else itemAttr
+                in  withAttr attr $
+                        padRight Max $
+                            txt line
 
 ------------------------------------------------------------------------
 -- Right pane — issue detail or terminal
